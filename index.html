@@ -206,7 +206,7 @@
                                 </tr>
                             </thead>
                             <tbody id="tableBodyEmployees" class="bg-white divide-y divide-gray-100 text-sm">
-                                </tbody>
+                            </tbody>
                         </table>
                     </div>
                     
@@ -221,7 +221,7 @@
     </div>
 
     <script>
-        // --- 1. การตั้งค่ากำหนดตัวแปรใช้งาน Supabase (ห้ามใช้ชื่อตัวแปรชนกับ Library) ---
+        // --- 1. การตั้งค่ากำหนดตัวแปรใช้งาน Supabase ---
         const SUPABASE_PROJECT_URL = "https://vnkqxtgfmwbnzcgnatwa.supabase.co"; 
         const SUPABASE_ANON_KEY = "sb_publishable_Rz6AXKPT8cQuXFm1LotpFw_46EsqmCc"; 
         
@@ -232,7 +232,7 @@
         let globalEmployeesArray = [];
         let departmentChartInstance = null;
         let salaryChartInstance = null;
-        let base64CompressedBlob = null; // เก็บ Blob ของไฟล์รูปที่บีบอัดแล้ว
+        let base64CompressedBlob = null; 
 
         // --- 3. ฟังก์ชันเริ่มต้นระบบ (Lifecycle Hooks) ---
         document.addEventListener("DOMContentLoaded", () => {
@@ -244,8 +244,8 @@
             const savedSession = sessionStorage.getItem("smarthr_session");
             if (savedSession) {
                 sessionUser = JSON.parse(savedSession);
+                setupRolePermissions(); // เรียกจัดสรรหน้าจอก่อนสลับหน้า
                 navigateTo("mainApp");
-                setupRolePermissions();
                 fetchSystemData();
             } else {
                 navigateTo("pageLogin");
@@ -264,9 +264,9 @@
             else loader.classList.add("hidden");
         }
 
-        // --- 4. ฟังก์ชันการตรวจสอบสิทธิ์และจัดการระบบล็อกอิน (Auth System) ---
+        // --- 4. ฟังก์ชันจัดการระบบล็อกอิน (Auth System) ---
         async function handleLogin(e) {
-            e.preventDefault();
+            if (e && e.preventDefault) e.preventDefault();
             toggleLoader(true);
             
             const userInp = document.getElementById("username").value.trim();
@@ -286,8 +286,10 @@
                 sessionStorage.setItem("smarthr_session", JSON.stringify(sessionUser));
                 
                 document.getElementById("formLogin").reset();
-                navigateTo("mainApp");
+                
+                // 🛠️ ลำดับแก้ไข: จัดการสิทธิ์การแสดงผลก่อนเปลี่ยนหน้าและดึงข้อมูลพนักงาน
                 setupRolePermissions();
+                navigateTo("mainApp");
                 await fetchSystemData();
                 
             } catch (err) {
@@ -306,6 +308,8 @@
         }
 
         function setupRolePermissions() {
+            if (!sessionUser) return;
+            
             const badge = document.getElementById("badgeRole");
             const navName = document.getElementById("txtNavUserRealName");
             const navRole = document.getElementById("txtNavRole");
@@ -314,13 +318,11 @@
             navRole.textContent = sessionUser.role;
             badge.textContent = sessionUser.role;
 
-            // ปรับสีป้ายสิทธิ์
             badge.className = "ml-2 px-2.5 py-0.5 rounded-full text-xs font-medium uppercase tracking-wider ";
             if (sessionUser.role === 'admin') badge.classList.add("bg-indigo-100", "text-indigo-800");
             else if (sessionUser.role === 'hr') badge.classList.add("bg-purple-100", "text-purple-800");
             else badge.classList.add("bg-green-100", "text-green-800");
 
-            // การควบคุมการเข้าถึง UI ฟอร์มตามสิทธิ์ผู้ใช้งาน (Role Auth Control)
             const formEmp = document.getElementById("formEmployee");
             const alertBox = document.getElementById("viewOnlyAlert");
             const dashboardSec = document.getElementById("sectionDashboard");
@@ -328,27 +330,31 @@
             if (sessionUser.role === 'employee') {
                 formEmp.classList.add("hidden");
                 alertBox.classList.remove("hidden");
-                dashboardSec.classList.add("hidden"); // ปิด Dashboard สำหรับ Employee
+                dashboardSec.classList.add("hidden"); 
             } else {
                 formEmp.classList.remove("hidden");
                 alertBox.classList.add("hidden");
-                dashboardSec.classList.remove("hidden"); // แสดง Dashboard สำหรับ Admin และ HR
+                dashboardSec.classList.remove("hidden"); 
             }
         }
 
-        // --- 5. การดึงข้อมูลและการประมวลผลโมเดลสถิติ (Data Query & Dashboard Analytics) ---
+        // --- 5. การดึงข้อมูลพนักงาน (CRUD: Read) ---
         async function fetchSystemData() {
+            if (!sessionUser) return;
             toggleLoader(true);
             try {
                 let query = hrSupabaseClient.from('smarthr_employees').select('*');
                 
-                // สำหรับพนักงานธรรมดา ให้ดึงได้แค่ข้อมูลที่มีชื่อตรงกับโปรไฟล์ตนเองเท่านั้น
                 if (sessionUser.role === 'employee') {
                     query = query.eq('fullname', sessionUser.fullname);
                 }
 
                 const { data, error } = await query.order('id', { ascending: false });
-                if (error) throw error;
+                
+                // 🛠️ ตรวจสอบ Error เชิงลึก: แจ้งให้ผู้ใช้ทราบทันทีหากตารางในฐานข้อมูลผิดพลาด
+                if (error) {
+                    throw new Error(`[Supabase Error] ไม่สามารถดึงข้อมูลตาราง smarthr_employees ได้: ${error.message}`);
+                }
 
                 globalEmployeesArray = data || [];
                 renderEmployeeTable();
@@ -357,7 +363,8 @@
                     calculateDashboardMetrics(globalEmployeesArray);
                 }
             } catch (err) {
-                console.error("เกิดข้อผิดพลาดในการโหลดข้อมูลองค์กร:", err.message);
+                console.error(err);
+                alert(err.message + "\n\n💡 แนะนำ: กรุณาตรวจสอบว่าได้เปิด SQL Editor ใน Supabase และรันสคริปต์สร้างตาราง smarthr_employees เรียบร้อยแล้วหรือไม่");
             } finally {
                 toggleLoader(false);
             }
@@ -367,18 +374,18 @@
             const totalCount = employees.length;
             const totalSalary = employees.reduce((sum, item) => sum + Number(item.salary), 0);
             
-            // สกัดจำนวนแผนกที่ไม่ซ้ำกัน
             const deptMap = {};
             const salaryMap = {};
             
             employees.forEach(emp => {
-                deptMap[emp.department] = (deptMap[emp.department] || 0) + 1;
-                salaryMap[emp.department] = (salaryMap[emp.department] || 0) + Number(emp.salary);
+                if (emp.department) {
+                    deptMap[emp.department] = (deptMap[emp.department] || 0) + 1;
+                    salaryMap[emp.department] = (salaryMap[emp.department] || 0) + Number(emp.salary);
+                }
             });
 
             const uniqueDeptsCount = Object.keys(deptMap).length;
 
-            // แสดงผลลัพธ์ผ่าน DOM Elements แบบสด (ไม่รีเฟรชเว็บบอร์ด)
             document.getElementById("statTotalEmployees").textContent = `${totalCount} คน`;
             document.getElementById("statTotalSalary").textContent = `฿${totalSalary.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
             document.getElementById("statTotalDepts").textContent = `${uniqueDeptsCount} แผนก`;
@@ -394,7 +401,12 @@
             if (departmentChartInstance) departmentChartInstance.destroy();
             if (salaryChartInstance) salaryChartInstance.destroy();
 
-            const ctxDept = document.getElementById('chartDepartment').getContext('2d');
+            // ตรวจสอบความพร้อมของ Element ก่อนวาดกราฟป้องกันระบบค้าง
+            const canvasDept = document.getElementById('chartDepartment');
+            const canvasSalary = document.getElementById('chartSalary');
+            if (!canvasDept || !canvasSalary) return;
+
+            const ctxDept = canvasDept.getContext('2d');
             departmentChartInstance = new Chart(ctxDept, {
                 type: 'bar',
                 data: {
@@ -410,7 +422,7 @@
                 options: { responsive: true, maintainAspectRatio: false }
             });
 
-            const ctxSalary = document.getElementById('chartSalary').getContext('2d');
+            const ctxSalary = canvasSalary.getContext('2d');
             salaryChartInstance = new Chart(ctxSalary, {
                 type: 'pie',
                 data: {
@@ -430,18 +442,17 @@
             });
         }
 
-        // --- 6. การแสดงข้อมูลตารางพนักงานและการจัดการรูปภาพพัง (Fallback Handling) ---
+        // --- 6. การแสดงข้อมูลตารางพนักงาน ---
         function renderEmployeeTable() {
             const tableBody = document.getElementById("tableBodyEmployees");
             const emptyState = document.getElementById("divTableEmptyState");
             const searchVal = document.getElementById("txtSearch").value.toLowerCase();
 
-            // คัดกรองข้อมูลตามคีย์เวิร์ดในช่องค้นหา
             const filtered = globalEmployeesArray.filter(emp => 
-                emp.emp_code.toLowerCase().includes(searchVal) ||
-                emp.fullname.toLowerCase().includes(searchVal) ||
-                emp.department.toLowerCase().includes(searchVal) ||
-                emp.position.toLowerCase().includes(searchVal)
+                (emp.emp_code && emp.emp_code.toLowerCase().includes(searchVal)) ||
+                (emp.fullname && emp.fullname.toLowerCase().includes(searchVal)) ||
+                (emp.department && emp.department.toLowerCase().includes(searchVal)) ||
+                (emp.position && emp.position.toLowerCase().includes(searchVal))
             );
 
             tableBody.innerHTML = "";
@@ -456,14 +467,12 @@
                 const tr = document.createElement("tr");
                 tr.className = "hover:bg-gray-50 transition duration-150";
 
-                // จัดการเรื่องรูปโปรไฟล์พนักงานและการจัดการ Error Handling ถ้ารูปโหลดไม่ได้
                 const avatarImg = emp.avatar_url 
                     ? `<img src="${emp.avatar_url}" alt="Profile" class="w-10 h-10 rounded-full object-cover" onerror="handleImageLoadError(this)">`
-                    : `<div class="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm">${emp.fullname.charAt(0)}</div>`;
+                    : `<div class="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm">${(emp.fullname || 'P').charAt(0)}</div>`;
 
-                // ควบคุมปุ่มแก้ไขและลบตามโครงสร้างสิทธิ์การเข้าถึง (Role-Based Action Controls)
                 let actionButtons = `<span class="text-xs text-gray-400 italic">ไม่มีสิทธิ์จัดการ</span>`;
-                if (sessionUser.role === 'admin' || sessionUser.role === 'hr') {
+                if (sessionUser && (sessionUser.role === 'admin' || sessionUser.role === 'hr')) {
                     actionButtons = `
                         <button onclick="prepareEditEmployee(${emp.id})" class="text-indigo-600 hover:text-indigo-900 p-1 rounded hover:bg-indigo-50 inline-flex items-center text-xs mr-2 transition">
                             <i data-lucide="edit-2" class="w-3.5 h-3.5 mr-1"></i> แก้ไข
@@ -483,17 +492,17 @@
                         <div class="flex items-center space-x-3">
                             ${avatarImg}
                             <div>
-                                <div class="text-sm font-medium text-gray-900">${emp.fullname}</div>
-                                <div class="text-xs text-gray-500 font-mono">${emp.emp_code}</div>
+                                <div class="text-sm font-medium text-gray-900">${emp.fullname || ''}</div>
+                                <div class="text-xs text-gray-500 font-mono">${emp.emp_code || ''}</div>
                             </div>
                         </div>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                        <div class="text-sm text-gray-900">${emp.position}</div>
-                        <div class="text-xs text-gray-500">${emp.department}</div>
+                        <div class="text-sm text-gray-900">${emp.position || ''}</div>
+                        <div class="text-xs text-gray-500">${emp.department || ''}</div>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium">
-                        ฿${Number(emp.salary).toLocaleString()}
+                        ฿${Number(emp.salary || 0).toLocaleString()}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         ${actionButtons}
@@ -505,7 +514,6 @@
             lucide.createIcons();
         }
 
-        // กรณีรูปถ่ายใน Supabase Storage โหลดไม่ผ่าน/ไม่มีไฟล์จริง แสดงข้อความทดแทนตระกูล Error Handling
         function handleImageLoadError(imageElement) {
             const parent = imageElement.parentElement;
             if (parent) {
@@ -513,12 +521,11 @@
             }
         }
 
-        // --- 7. การเพิ่มประหยัดพื้นที่คลาวด์: บีบอัดรูปภาพผ่าน Client Canvas (Image Compression) ---
+        // --- 7. การบีบอัดรูปภาพผ่าน HTML5 Canvas ---
         function previewAndCompressImage(event) {
             const file = event.target.files[0];
             if (!file) return;
 
-            // แสดงตัวโหลดย่อยระดับ Element Preview
             const previewContainer = document.getElementById("avatarPreviewContainer");
             previewContainer.innerHTML = `<div class="animate-spin rounded-full h-5 w-5 border-t-2 border-indigo-600"></div>`;
             
@@ -528,7 +535,6 @@
                 const img = new Image();
                 img.src = e.target.result;
                 img.onload = function() {
-                    // คำนวณขอบเขตสัดส่วนภาพแบบรักษาสมดุล (Max 300px)
                     const maxCoord = 300;
                     let targetWidth = img.width;
                     let targetHeight = img.height;
@@ -545,22 +551,18 @@
                         }
                     }
 
-                    // วาดลงบนโมเดล Canvas จำลองเพื่อเปลี่ยนขนาดไฟล์และบีบอัดภาพ
                     const canvas = document.createElement('canvas');
                     canvas.width = targetWidth;
                     canvas.height = targetHeight;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-                    // แปลงและบีบอัดภาพเป็นประเภท JPEG ที่มีคุณภาพ 70% เพื่อลดความจุทรัพยากร
                     canvas.toBlob((blob) => {
                         base64CompressedBlob = blob;
                         
-                        // แสดงรูปตัวอย่างทดแทน
                         const previewUrl = URL.createObjectURL(blob);
                         previewContainer.innerHTML = `<img src="${previewUrl}" class="w-full h-full object-cover">`;
                         
-                        // รายงานผลสัมฤทธิ์ขนาดการบีบอัดไฟล์
                         const statTxt = document.getElementById("txtCompressStatus");
                         statTxt.textContent = `บีบอัดสำเร็จเหลือ: ${(blob.size / 1024).toFixed(1)} KB`;
                         statTxt.classList.remove("hidden");
@@ -569,7 +571,7 @@
             };
         }
 
-        // --- 8. กระบวนการสร้างและแก้ไขข้อมูลบุคลากร (Create, Update / Form Management) ---
+        // --- 8. กระบวนการสร้างและแก้ไขข้อมูลบุคลากร (CRUD) ---
         async function handleEmployeeSubmit(e) {
             e.preventDefault();
             toggleLoader(true);
@@ -585,13 +587,11 @@
             try {
                 let currentAvatarUrl = null;
                 
-                // ค้นหาว่าถ้าเป็นการแก้ไข ให้ดึง url ภาพเดิมไว้ก่อนกรณีไม่มีการส่งภาพใหม่
                 if (recordId) {
                     const matchItem = globalEmployeesArray.find(x => x.id == recordId);
                     if (matchItem) currentAvatarUrl = matchItem.avatar_url;
                 }
 
-                // กระบวนการอัปโหลดไฟล์ภาพไปยัง Supabase Storage Bucket แบบ Real Public
                 if (base64CompressedBlob) {
                     const fileExtension = "jpg";
                     const newFileName = `emp_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExtension}`;
@@ -605,7 +605,6 @@
 
                     if (uploadErr) throw uploadErr;
 
-                    // สกัดรับ URL สาธารณะของรูปภาพ
                     const { data: publicUrlData } = hrSupabaseClient.storage
                         .from('hr-avatars')
                         .getPublicUrl(newFileName);
@@ -624,14 +623,12 @@
                 };
 
                 if (recordId) {
-                    // ทำกระบวนการแก้ไข (Update)
                     const { error } = await hrSupabaseClient
                         .from('smarthr_employees')
                         .update(payload)
                         .eq('id', recordId);
                     if (error) throw error;
                 } else {
-                    // ทำกระบวนการสร้างใหม่ (Create)
                     const { error } = await hrSupabaseClient
                         .from('smarthr_employees')
                         .insert([payload]);
@@ -655,7 +652,6 @@
             document.getElementById("formTitle").innerHTML = `<i data-lucide="edit-3" class="w-5 h-5 mr-2 text-yellow-500"></i> แก้ไขข้อมูลพนักงาน`;
             document.getElementById("btnCancelEdit").classList.remove("hidden");
 
-            // ฝังข้อมูลดิบลง Form Inputs โดยไม่ทำการโหลดหน้าเว็บใหม่ (SPA Standard)
             document.getElementById("empId").value = target.id;
             document.getElementById("empCode").value = target.emp_code;
             document.getElementById("empFullName").value = target.fullname;
@@ -676,15 +672,16 @@
             lucide.createIcons();
         }
 
-        // ล้างค่าในฟอร์มเพื่อเริ่มงานใหม่แทนการรีโหลดเว็บพัง
         function resetEmployeeForm() {
             document.getElementById("formEmployee").reset();
             document.getElementById("empId").value = "";
             base64CompressedBlob = null;
             
             document.getElementById("formTitle").innerHTML = `<i data-lucide="user-plus" class="w-5 h-5 mr-2 text-indigo-500"></i> เพิ่มข้อมูลพนักงานใหม่`;
-            document.getElementById("btnCancelEdit").class= "hidden";
-            document.getElementById("btnCancelEdit").classList.add("hidden");
+            
+            const btnCancel = document.getElementById("btnCancelEdit");
+            if (btnCancel) btnCancel.classList.add("hidden");
+            
             document.getElementById("txtCompressStatus").classList.add("hidden");
             document.getElementById("avatarPreviewContainer").innerHTML = `<i data-lucide="user" class="w-6 h-6 text-gray-400"></i>`;
             
@@ -692,24 +689,22 @@
             lucide.createIcons();
         }
 
-        // --- 9. กระบวนการลบข้อมูล (Delete Operation) ---
+        // --- 9. กระบวนการลบข้อมูล (Delete) ---
         async function deleteEmployee(id, avatarUrl) {
             if (!confirm("คุณมั่นใจที่จะลบข้อมูลบุคลากรรายนี้ออกจากฐานข้อมูลระบบหรือไม่?")) return;
             toggleLoader(true);
 
             try {
-                // พยายามลบรูปใน Storage หากมีรูปผูกอยู่
                 if (avatarUrl) {
                     try {
                         const urlSegments = avatarUrl.split('/');
                         const fileName = urlSegments[urlSegments.length - 1];
                         await hrSupabaseClient.storage.from('hr-avatars').remove([fileName]);
                     } catch (storageErr) {
-                        console.warn("ไม่สามารถลบไฟล์รูปถ่ายออกจากระบบคลาวด์ได้:", storageErr.message);
+                        console.warn("ไม่สามารถลบไฟล์รูปถ่ายออกจากคลาวด์ได้:", storageErr.message);
                     }
                 }
 
-                // ลบแถวข้อมูลจากตารางพนักงาน
                 const { error } = await hrSupabaseClient
                     .from('smarthr_employees')
                     .delete()
@@ -717,7 +712,6 @@
 
                 if (error) throw error;
                 
-                // หากกำลังเคลียร์ข้อมูลรายการที่กำลังเปิดแก้ไขอยู่ ให้ทำการล้างหน้าฟอร์มด้วย
                 if (document.getElementById("empId").value == id) {
                     resetEmployeeForm();
                 }
